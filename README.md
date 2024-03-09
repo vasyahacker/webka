@@ -1,2 +1,2 @@
 # webka
-[PoC] Web interface rof OpenBSD router 
+[PoC] Web interface for OpenBSD router

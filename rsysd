@@ -1,0 +1,142 @@
+#!/bin/ksh
+
+ANSWER_TO_WEB_FILE=/var/www/router/ans_from
+
+regex_hostname='^(([[:alpha:]](-{0,2}[[:alnum:]])*)\.)+([[:alpha:]]{2,}|[xX]{1}[nN]{1}--[a-zA-Z0-9][a-zA-Z0-9\-]*[a-zA-Z0-9])$'
+
+TMP=/tmp/rsysd
+LOG_FILE=/home/slaytor/rsysd.log
+
+log(){ echo "$(date +'%z %x %R:%S'): $1" | tee -a "$LOG_FILE"; }
+die(){ log "$1"; exit 1; }
+
+mkdir -p -m 0700 $TMP || { die "error tmp dir"; }
+
+lock_ans_file="$TMP/ANSWER_TO_WEB.lock"
+
+lock_ans() {
+#TODO
+# remove very old lock file
+	while [ -e $lock_ans_file ];do sleep 0.1;done
+	touch $lock_ans_file
+}
+
+alias unlock_ans="rm -f $lock_ans_file"
+
+ANSWER_TO_WEB() {
+	local answer="$1"
+	lock_ans
+	echo "$answer" # | tee -a $ANSWER_TO_WEB_FILE
+	unlock_ans
+}
+
+get_hostname() {
+#	local _hostname="$(hostname)"
+#	ANSWER_TO_WEB "hostname:$_hostname"
+	hostname
+}
+
+hostname_approved="$TMP/hostname_approved"
+waiting_for_hostname_approve="$TMP/waiting_for_hostname_approve"
+waiting_hostname_approve() {
+	# пока нет апрува ждать 10 сек и если он не появился - реверт
+	local _old_hostname="$1"
+	local _i=10
+	touch $waiting_for_hostname_approve || {
+		ANSWER_TO_WEB "set_hostname:error:can't start waiting for approve"
+		exit 1 
+	}
+	while true; do
+		[ -e $hostname_approved ] && {
+			rm -f $hostname_approved
+			#ANSWER_TO_WEB "set_hostname:approved"
+			break
+		}
+		sleep 1
+		((_i--))
+		[ $_i -eq 0 ] && {
+			doas hostname "$_old_hostname" || {
+				#ANSWER_TO_WEB "set_hostname:error:can't revert hostname"
+				break
+			}
+			#ANSWER_TO_WEB "set_hostname:hostname reverted"
+			break
+		}
+	done
+	rm -f $waiting_for_hostname_approve
+}
+
+set_hostname() {
+	local _hostname="$1"
+	local _domain_len="$(echo -n "$_hostname" | wc -c | tr -d [:space:])"
+	local _old_hostname="$(hostname)"
+
+	[ -z "$_domain_len" -o "$_domain_len" == "0" -o "$_domain_len" -gt 253 ] && {
+		ANSWER_TO_WEB "set_hostname:error:wrong hostname length"
+		return 1
+	}
+
+	echo -n "$_hostname" | grep -q -E "$regex_hostname" || {
+		ANSWER_TO_WEB "set_hostname:error:invalid hostname"
+		return 1
+	}
+	[ -e $waiting_for_hostname_approve ] && {
+		ANSWER_TO_WEB "set_hostname:error:already waiting for approve"
+		return 1 
+	}
+	doas hostname "$_hostname" || {
+		ANSWER_TO_WEB "set_hostname:error:can't set hostname"
+		return 1
+	}
+	ANSWER_TO_WEB "set_hostname:ok:waiting for approve"
+	#nohup sh -c "hostname_approved='$hostname_approved';waiting_for_hostname_approve='$waiting_for_hostname_approve';$(typeset -f lock_ans);$(typeset -f ANSWER_TO_WEB);$(typeset -f waiting_hostname_approve);waiting_hostname_approve '$_old_hostname'" 2>&1 >/dev/null &
+	waiting_hostname_approve "$_old_hostname" &
+}
+
+approve() {
+	local _what="$1"
+	case "$_what" in
+		hostname)
+			[ -e $waiting_for_hostname_approve ] || {
+				ANSWER_TO_WEB "approve_hostname:error:not expected"
+				return 1
+			}
+			touch $hostname_approved
+			;;
+		*) ;;
+	esac
+}
+
+main_loop() {
+#	echo "Token?"
+#	read TOKEN
+#	[ "$TOKEN" != "secret" ] && exit 1
+	while read -r action param1 param2 param3
+	do
+		case "$action" in
+			get_hostname) get_hostname; exit 0 ;;
+			set_hostname) set_hostname "$param1" ;;
+			approve) approve "$param1" ;;
+			bb) break ;;
+			*)
+				ANSWER_TO_WEB "error:unknow command"
+				exit 1
+			;;
+		esac
+	done
+}
+
+MYPID=$$
+time_out() {
+	sleep 18;
+	echo "timeout";
+	kill -TERM $MYPID
+}
+
+#time_out &
+
+main_loop
+#my_full_path="$(readlink -f "$0")"
+#[ -z "$1" ] && timeout 10s $my_full_path hoho 
+#[ "$1" = "hoho" ] && main_loop
+exit 0
