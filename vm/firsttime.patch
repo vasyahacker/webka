@@ -1,0 +1,3 @@
+2442a2443,2444
+> 	[[ -f /rc.firsttime ]] && cat rc.firsttime >> /mnt/etc/rc.firsttime
+> 

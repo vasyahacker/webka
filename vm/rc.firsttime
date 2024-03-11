@@ -1,0 +1,52 @@
+echo
+echo "Hello dear Tester!"
+echo
+echo "Welcome to OpenBSD based"
+banner "Router"
+echo
+echo "Initialization test environment.."
+echo
+echo "Disabling KARL (removing kernel sha)"
+rm -f /var/db/kernel.SHA256
+echo "Optimizations: memory and vm load speed.."
+rcctl disable smtpd pflogd sndiod library_aslr cron slaacd ntpd
+echo
+rcctl stop sndiod
+rcctl stop slaacd
+rcctl stop smtpd
+rcctl stop cron
+rcctl stop pflogd
+rcctl stop ntpd
+#printf 'disable inteldrm\nq\n' | config -ef /bsd
+echo
+echo "Installing dependencies.."
+pkg_add kcgi
+echo "Creating user 'rsysd' for runing backend inetd -> rsysd script"
+useradd -d /dev/null -s /sbin/nologin -c 'user for web-interface backend' rsysd
+echo "Setup router web interface.."
+cd /root
+ftp -o webka.tgz https://github.com/vasyahacker/webka/tarball/master
+tar xzvf webka.tgz
+mv vasyahacker-webka-* webka
+cd webka
+make install
+echo "Starting services.."
+rcctl enable inetd # httpd slowcgi
+rcctl start inetd # httpd slowcgi
+echo
+cat << '_EOF' > /etc/rc.local
+echo
+IP="$(ifconfig vio0 | grep -E 'inet.[0-9]' | awk '{ print $2 }')"
+echo "********************************"
+echo "Press '~' than '.' to detach"
+echo "Use ssh root@$IP"
+echo "(default password: puffy)"
+echo "Web admin:"
+echo "http://$IP/cgi-bin/system"
+echo "********************************"
+echo
+echo "Starting httpd and slowcgi in debug verbose mode.."
+httpd -dvvv >> /dev/console 2>&1 &
+slowcgi -d >> /dev/console 2>&1
+_EOF
+
